@@ -1,31 +1,51 @@
 class AccountsController < ApplicationController
-  before_action :authenticate_user!
+  layout :with_sidebar
 
-  def new
-    @account = Account.new(
-      original_balance: nil,
-      accountable: Accountable.from_type(params[:type])&.new
-    )
+  before_action :set_account, only: %i[sync]
+
+  def index
+    @manual_accounts = Current.family.accounts.manual.alphabetically
+    @plaid_items = Current.family.plaid_items.ordered
   end
 
-  def show
-    @account = Current.family.accounts.find(params[:id])
+  def summary
+    @period = Period.from_param(params[:period])
+    snapshot = Current.family.snapshot(@period)
+    @net_worth_series = snapshot[:net_worth_series]
+    @asset_series = snapshot[:asset_series]
+    @liability_series = snapshot[:liability_series]
+    @accounts = Current.family.accounts.active
+    @account_groups = @accounts.by_group(period: @period, currency: Current.family.currency)
   end
 
-  def create
-    @account = Current.family.accounts.build(account_params.except(:accountable_type))
-    @account.accountable = Accountable.from_type(account_params[:accountable_type])&.new
+  def list
+    @period = Period.from_param(params[:period])
+    render layout: false
+  end
 
-    if @account.save
-      redirect_to accounts_path, notice: t(".success")
-    else
-      render "new", status: :unprocessable_entity
+  def sync
+    unless @account.syncing?
+      @account.sync_later
     end
+
+    redirect_to account_path(@account)
+  end
+
+  def chart
+    @account = Current.family.accounts.find(params[:id])
+    render layout: "application"
+  end
+
+  def sync_all
+    unless Current.family.syncing?
+      Current.family.sync_later
+    end
+
+    redirect_to accounts_path
   end
 
   private
-
-  def account_params
-    params.require(:account).permit(:name, :accountable_type, :original_balance, :original_currency, :subtype)
-  end
+    def set_account
+      @account = Current.family.accounts.find(params[:id])
+    end
 end
